@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Secure Form</title>
+  </head>
+  <body>
+    <h2>Fill Out the Form</h2>
+    <form id="secure-form">
+      <label for="name">Name:</label>
+      <input type="text" id="name" name="name" required /><br /><br />
+      <label for="email">Email:</label>
+      <input type="email" id="email" name="email" required /><br /><br />
+      <button type="submit">Submit</button>
+    </form>
+
+    <script>
+      document
+        .getElementById("secure-form")
+        .addEventListener("submit", async function (event) {
+          event.preventDefault();
+
+          const formData = {
+            name: document.getElementById("name").value,
+            email: document.getElementById("email").value,
+          };
+
+          // Create a digital signature on the client side
+          const encoder = new TextEncoder();
+          const encoded = encoder.encode(JSON.stringify(formData));
+
+          const cryptoKey = await crypto.subtle.generateKey(
+            {
+              name: "RSASSA-PKCS1-v1_5",
+              modulusLength: 2048,
+              publicExponent: new Uint8Array([1, 0, 1]),
+              hash: { name: "SHA-256" },
+            },
+            true,
+            ["sign", "verify"]
+          );
+
+          const signature = await crypto.subtle.sign(
+            "RSASSA-PKCS1-v1_5",
+            cryptoKey.privateKey,
+            encoded
+          );
+          const clientSignature = btoa(
+            String.fromCharCode(...new Uint8Array(signature))
+          );
+
+          // Send the data and signature to the server
+          const response = await fetch("/submit-form", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              data: formData,
+              clientSignature: clientSignature,
+              serverSignature: new URLSearchParams(window.location.search).get(
+                "signature"
+              ),
+            }),
+          });
+
+          const result = await response.json();
+          if (!response.ok) {
+            throw new Error(error.message);
+          }
+          alert(result.message);
+        });
+    </script>
+  </body>
+</html>
