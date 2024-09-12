@@ -5,6 +5,13 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Secure Form</title>
+    <style>
+      #signature-pad {
+        border: 1px solid #ccc;
+        width: 400px;
+        height: 200px;
+      }
+    </style>
   </head>
   <body>
     <h2>Fill Out the Form</h2>
@@ -13,12 +20,17 @@
       <input type="text" id="name" name="name" required /><br /><br />
       <label for="email">Email:</label>
       <input type="email" id="email" name="email" required /><br /><br />
+      <label for="signature">Signature:</label>
+      <canvas id="signature-pad"></canvas>
+
+      <input type="hidden" id="signature-data" name="signature-data" />
       <button type="submit">Submit</button>
     </form>
-
+    <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
     <script>
       const clientId = "client-unique-id"; // Use a unique identifier for the client
-
+      const canvas = document.getElementById("signature-pad");
+      const signaturePad = new SignaturePad(canvas);
       document
         .getElementById("secure-form")
         .addEventListener("submit", async function (event) {
@@ -55,14 +67,22 @@
             body: JSON.stringify({ clientId, publicKey: publicKeyJwk }),
           });
 
+          if (signaturePad.isEmpty()) {
+            alert("please provide a signature");
+            return;
+          }
+
+          const signatureData = signaturePad.toDataURL();
+          document.getElementById("signature-data").value = signatureData;
           // Create a digital signature on the client side
           const formData = {
             name: document.getElementById("name").value,
             email: document.getElementById("email").value,
+            signature: signatureData,
           };
 
           const encoder = new TextEncoder();
-          const encoded = encoder.encode(JSON.stringify(formData));
+          const encoded = encoder.encode(JSON.stringify(signatureData));
 
           const signature = await crypto.subtle.sign(
             "RSASSA-PKCS1-v1_5",
@@ -73,6 +93,8 @@
           const clientSignature = btoa(
             String.fromCharCode(...new Uint8Array(signature))
           );
+
+          console.log("clientSignature: ---    ", clientSignature);
 
           // Send the data and signature to the server
           const serverSignature = new URLSearchParams(
@@ -86,7 +108,7 @@
             },
             body: JSON.stringify({
               clientId,
-              data: formData,
+              data: signatureData,
               clientSignature: clientSignature,
               serverSignature: serverSignature,
             }),
@@ -94,6 +116,7 @@
 
           const result = await response.json();
           if (!response.ok) {
+            alert(result.message);
             throw new Error(result.message);
           }
           alert(result.message);
