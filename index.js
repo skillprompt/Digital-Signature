@@ -121,7 +121,8 @@ const verifySignature = (data, signature, publicKey) => {
 
 // Endpoint to handle form submissions
 app.post("/submit-form", (req, res) => {
-  const { clientId, data, clientSignature, serverSignature } = req.body;
+  const { clientId, data, dataSigned, clientSignature, serverSignature } =
+    req.body;
   console.log("Received Data:", data);
   console.log("Received clientId:", clientId);
   console.log("Received Client Signature:", clientSignature);
@@ -141,7 +142,11 @@ app.post("/submit-form", (req, res) => {
 
   // Verify the client's signature
   if (
-    !verifySignature(JSON.stringify(data), clientSignature, clientPublicKey)
+    !verifySignature(
+      JSON.stringify(dataSigned),
+      clientSignature,
+      clientPublicKey
+    )
   ) {
     return res.status(401).json({ message: "Invalid client signature." });
   }

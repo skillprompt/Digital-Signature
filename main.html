@@ -108,7 +108,8 @@
             },
             body: JSON.stringify({
               clientId,
-              data: signatureData,
+              data: formData,
+              dataSigned: signatureData,
               clientSignature: clientSignature,
               serverSignature: serverSignature,
             }),
