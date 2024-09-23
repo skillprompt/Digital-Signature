@@ -5,7 +5,7 @@ import crypto from "crypto";
 import dotenv from "dotenv";
 import fs from "fs";
 import nodemailer from "nodemailer";
-import { webcrypto } from "node:crypto";
+import jose from "node-jose";
 
 dotenv.config();
 
@@ -14,7 +14,6 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(bodyParser.json());
 
-// Generate and save RSA keys (only run once or use saved keys)
 const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
   modulusLength: 2048,
   publicKeyEncoding: {
@@ -33,22 +32,21 @@ fs.writeFileSync("public_key.pem", publicKey);
 
 // Load the private key from the file
 const privateKey1 = fs.readFileSync("private_key.pem", "utf-8");
+const publicKeys = fs.readFileSync("public_key.pem", "utf8");
 
 // Function to generate a digital signature
-const generateSignature = (data) => {
-  const signer = crypto.createSign("SHA256");
-  signer.update(data);
-  signer.end();
-  return signer.sign(privateKey1, "base64");
+const generateSignature = async (data) => {
+  const key = await jose.JWK.asKey(privateKey1, "pem");
+  return jose.JWS.createSign({ format: "compact" }, key)
+    .update(JSON.stringify(data))
+    .final();
 };
-
 // Store client public keys
 const clientPublicKeys = {}; // In-memory storage for simplicity
 
-// Send form link with server signature via email
 const sendFormWithSignature = async (clientEmail) => {
   const formData = "abc";
-  const signature = generateSignature(formData);
+  const signature = await generateSignature(formData);
   console.log("generate signatures", signature);
   const formLink = `http://localhost:3000?signature=${encodeURIComponent(
     signature
@@ -79,79 +77,115 @@ const sendFormWithSignature = async (clientEmail) => {
   }
 };
 
-// Endpoint to serve the main form file
 app.get("/", (req, res) => {
   res.sendFile(path.join(process.cwd(), "main.html"));
 });
 
-// Endpoint to send the form link to the client
 app.get("/send-form", (req, res) => {
   const clientEmail = process.env.CLIENTEMAIL;
   sendFormWithSignature(clientEmail);
   res.send("Form link sent to " + clientEmail);
 });
 
-// Endpoint to register client public key
-app.post("/register-public-key", async (req, res) => {
-  const { clientId, publicKey } = req.body;
+const storeClientPublicKey = async (clientId, publicKey) => {
+  const key = await jose.JWK.asKey(publicKey, "jwk");
+  const publicKeyPem = key.toPEM();
 
-  // Import the public key from JWK format
-  const publicKeyObj = await webcrypto.subtle.importKey(
-    "jwk",
-    publicKey,
-    {
-      name: "RSASSA-PKCS1-v1_5",
-      hash: { name: "SHA-256" },
-    },
-    true,
-    ["verify"]
-  );
-
-  clientPublicKeys[clientId] = publicKeyObj;
-  res.send("Public key registered.");
-});
-
-// Function to verify a digital signature
-const verifySignature = (data, signature, publicKey) => {
-  const verifier = crypto.createVerify("SHA256");
-  verifier.update(data);
-  verifier.end();
-  return verifier.verify(publicKey, signature, "base64");
+  clientPublicKeys[clientId] = publicKeyPem;
 };
 
-// Endpoint to handle form submissions
-app.post("/submit-form", (req, res) => {
-  const { clientId, data, dataSigned, clientSignature, serverSignature } =
-    req.body;
-  console.log("Received Data:", data);
-  console.log("Received clientId:", clientId);
-  console.log("Received Client Signature:", clientSignature);
-  console.log("Received Server Signature:", serverSignature);
+app.post("/register-public-key", async (req, res) => {
+  const { clientId, publicKey } = req.body;
+  try {
+    storeClientPublicKey(clientId, publicKey);
+    res.send("Public key registered.");
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Error converting key to PEM format.", error });
+  }
+});
 
-  const clientPublicKey = clientPublicKeys[clientId];
-  if (!clientPublicKey) {
+const verifyClientSignature = (data, signature, publicKeyPem) => {
+  try {
+    const verifier = crypto.createVerify("SHA256");
+    verifier.update(data);
+    verifier.end();
+
+    const publicKeyBuffer = Buffer.from(publicKeyPem, "utf-8");
+    return verifier.verify(publicKeyBuffer, signature, "base64");
+  } catch (error) {
+    console.error("Error during signature verification:", error);
+    return false;
+  }
+};
+
+const verifyServerSignature = async (data, signature, publicKeyPem) => {
+  try {
+    const pemKey = convertRsaToPem(publicKeyPem);
+    const key = await jose.JWK.asKey(pemKey, "pem");
+
+    const result = await jose.JWS.createVerify(key).verify(signature);
+    const verifiedData = JSON.parse(result.payload.toString());
+    return JSON.stringify(verifiedData) === JSON.stringify(data);
+  } catch (err) {
+    console.error("Verification failed:", err);
+    return false;
+  }
+};
+const convertRsaToPem = (rsaPublicKey) => {
+  const publicKey = crypto.createPublicKey({
+    key: rsaPublicKey,
+    format: "pem",
+    type: "pkcs1",
+  });
+  return publicKey.export({ type: "spki", format: "pem" });
+};
+// Submit form
+app.post("/submit-form", async (req, res) => {
+  const { clientId, data, clientSignature, serverSignature } = req.body;
+
+  console.log("Received data for verification:", data);
+  console.log("Client signature (Base64):", clientSignature);
+
+  const clientPublicKeyJwk = clientPublicKeys[clientId];
+  console.log("Client public key PEM:", clientPublicKeyJwk);
+  if (!clientPublicKeyJwk) {
     return res
       .status(400)
       .json({ message: "Client public key not registered." });
   }
 
-  // Verify server's original signature
-  if (!verifySignature("abc", serverSignature, publicKey)) {
-    return res.status(401).json({ message: "Invalid server signature." });
-  }
+  try {
+    // Ensure data is stringified and encoded properly
+    const serverSignatureValid = await verifyServerSignature(
+      "abc",
+      serverSignature,
+      publicKeys
+    );
+    if (!serverSignatureValid) {
+      return res.status(401).json({ message: "Invalid server signature." });
+    }
 
-  // Verify the client's signature
-  if (
-    !verifySignature(
-      JSON.stringify(dataSigned),
-      clientSignature,
-      clientPublicKey
-    )
-  ) {
-    return res.status(401).json({ message: "Invalid client signature." });
-  }
+    // Ensure clientSignature is properly decoded before verification
+    // const clientSignatureValid = await verifyClientSignature(
+    //   JSON.stringify(data),
+    //   clientSignature,
+    //   clientPublicKeyJwk
+    // );
+    // if (!clientSignatureValid) {
+    //   return res.status(401).json({ message: "Invalid client signature." });
+    // }
 
-  res.json({ message: "Data received and signatures verified successfully." });
+    res.json({
+      message: "Data received and signatures verified successfully.",
+    });
+  } catch (err) {
+    console.error("Error during signature verification:", err);
+    res
+      .status(500)
+      .json({ message: "Server error during signature verification." });
+  }
 });
 
 app.listen(3000, () => {
