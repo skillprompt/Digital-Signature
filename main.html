@@ -171,75 +171,28 @@
           }
 
           const signatureData = signaturePad.toDataURL();
+
           document.getElementById("signature-data").value = signatureData;
 
-          // Generate RSA keys on client side
-          const cryptoKeyPair = await crypto.subtle.generateKey(
-            {
-              name: "RSASSA-PKCS1-v1_5",
-              modulusLength: 2048,
-              publicExponent: new Uint8Array([1, 0, 1]),
-              hash: { name: "SHA-256" },
-            },
-            true,
-            ["sign", "verify"]
-          );
-
-          // Export keys to JWK format
-          const publicKeyJwk = await crypto.subtle.exportKey(
-            "jwk",
-            cryptoKeyPair.publicKey
-          );
-          const privateKeyJwk = await crypto.subtle.exportKey(
-            "jwk",
-            cryptoKeyPair.privateKey
-          );
-
-          // Register public key with server
-          await fetch("/register-public-key", {
+          const res = await fetch("/register-clientId", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({ clientId, publicKey: publicKeyJwk }),
+            body: JSON.stringify({ clientId, signatureData }),
           });
+          const data = await res.json();
+          console.log("data-", data.signature);
 
           // Sign the form data with the private key
           const formData = {
             name: document.getElementById("name").value,
             email: document.getElementById("email").value,
-            signature: signatureData,
           };
-
-          const encoder = new TextEncoder();
-          const encodedData = encoder.encode(JSON.stringify(signatureData));
-
-          const signature = await crypto.subtle.sign(
-            {
-              name: "RSASSA-PKCS1-v1_5",
-              hash: { name: "SHA-256" },
-            },
-            await crypto.subtle.importKey(
-              "jwk",
-              privateKeyJwk,
-              {
-                name: "RSASSA-PKCS1-v1_5",
-                hash: { name: "SHA-256" },
-              },
-              true,
-              ["sign"]
-            ),
-            encodedData
-          );
-
-          const clientSignature = btoa(
-            String.fromCharCode(...new Uint8Array(signature))
-          );
 
           const serverSignature = new URLSearchParams(
             window.location.search
           ).get("signature");
-
           const response = await fetch("/submit-form", {
             method: "POST",
             headers: {
@@ -247,9 +200,10 @@
             },
             body: JSON.stringify({
               clientId,
+              signature: data.signature,
               data: signatureData,
-              clientSignature: clientSignature,
-              serverSignature: serverSignature,
+              Alldata: formData,
+              serverSignature,
             }),
           });
 
