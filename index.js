@@ -13,7 +13,7 @@ const serverPublicKey = fs.readFileSync("public_key.pem", "utf-8");
 const serverPrivateKey = fs.readFileSync("private_key.pem", "utf-8");
 const serverSecretCode = "abcd";
 const obj = {};
-function generateKeysForClient(clientId, data) {
+function generateKeysForClient(clientId, dataToBeSign) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
     modulusLength: 2048, // Key size
     publicKeyEncoding: {
@@ -26,16 +26,18 @@ function generateKeysForClient(clientId, data) {
     },
   });
   obj[clientId] = {
-    data: data,
+    dataToBeSign: dataToBeSign,
     publicKey: publicKey,
     privateKey: privateKey,
   };
   // array.push(obj);
   // return array;
-  // console.log("object", obj);
-  console.log("public-----=", publicKey);
-  return { obj, data, privateKey, publicKey };
+  console.log("object", obj);
+
+  return { obj, dataToBeSign, privateKey, publicKey };
 }
+
+// function to send a formURL through gmail using nodemailer
 const sendFromWithSignature = async (clientEmail) => {
   const serverSignature = generateSignature(serverSecretCode, serverPrivateKey);
   const formLink = `http://localhost:4000?signature=${encodeURIComponent(
@@ -103,10 +105,10 @@ app.post("/register-clientID", async (req, res) => {
 });
 
 app.post("/submit-form", (req, res) => {
-  const { clientId, signature, data, Alldata, serverSignature } = req.body;
-  const base64Signature = data.split(",")[1];
-  const signatureBuffer = Buffer.from(base64Signature, "base64");
-  if (!clientId || !signature || !signatureBuffer || !Alldata) {
+  const { clientId, signature, Alldata, serverSignature } = req.body;
+  // const base64Signature = data.split(",")[1];
+  // const signatureBuffer = Buffer.from(base64Signature, "base64");
+  if (!clientId || !signature || !serverSignature || !Alldata) {
     return res.status(403).json({
       success: false,
       message: "All fields are required",
@@ -123,6 +125,8 @@ app.post("/submit-form", (req, res) => {
         message: "Client data not found.",
       });
     }
+    const data = clientData.dataToBeSign;
+    console.log("data   ", data);
 
     const publicKey = clientData.publicKey;
     console.log("publicKey123", publicKey);
@@ -134,7 +138,7 @@ app.post("/submit-form", (req, res) => {
       });
     }
 
-    if (!verifySignature(signatureBuffer, signature, publicKey)) {
+    if (!verifySignature(data, signature, publicKey)) {
       return res.status(401).json({
         success: false,
         message: "Invalid signature.",
@@ -165,6 +169,7 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(process.cwd(), "main.html"));
 });
 
+// function to generateSignaute
 function generateSignature(data, privateKey) {
   const sign = crypto.createSign("SHA256");
   sign.update(data);
@@ -175,6 +180,7 @@ function generateSignature(data, privateKey) {
   return signature;
 }
 
+// function to verifySignature
 const verifySignature = (data, signature, publicKey) => {
   const verifier = crypto.createVerify("SHA256");
   verifier.update(data);
