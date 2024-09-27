@@ -53,7 +53,7 @@ The code ensures that both the client's and server's signatures are validated be
 
 - Server verify this signature by calling verifySignature()
 
-## Starts
+## Start
 
 To run this code, run the following command
 
