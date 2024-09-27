@@ -6,4 +6,3 @@ public_key.pem
 yarn.lock
 .gitignore 
 keys
-README.mds
