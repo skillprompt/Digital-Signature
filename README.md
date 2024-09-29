@@ -20,7 +20,7 @@ The client generates its own RSA key pair and uses the private key to sign the f
 #### 2. Server-Side Signature Verification:
 
 The server generates its own RSA key pair and uses its private key to sign a secret code (serverSecretCode). This signature is included in the form URL sent to the client via email.
-When the client submits the form, both the client's signature and the server's signature are sent back to the server.
+When the client submits the form, both the client's signature and the signature got from formURL params(server-signature) are sent back to the server.
 The server verifies both signatures:
 The client's signature is verified using the public key that the client registered.
 The server's own signature is verified using the stored public key to ensure the form came from a trusted source.
@@ -35,7 +35,7 @@ The code ensures that both the client's and server's signatures are validated be
 
 ## Flow
 
-- At first server has it own asymmetric key and secretCode, generate a serverSignature using private keys. This signature is attached to the formURL.
+- At first server has it own asymmetric key and secretCode, generate a server-signature using private keys. This signature is attached to the formURL.
 
 - There is an Api called send-form which uses a nodemailer to send a FormUrl to the client.
 
@@ -43,13 +43,13 @@ The code ensures that both the client's and server's signatures are validated be
 
 #### Register-clientId
 
-- In this api client send a clientId and signatureImg to the server and server generate asymmetric keys, saves to the clientId object.
+- In this api client send a clientId and signature-img to the server and server generate asymmetric keys, saves to the clientId object.
 
-- Generate a clientSignature using privatekeys and signatureImg and send clientSignature to the client as a Response.
+- Generate a client-signature using privatekeys and signature-img and send client-signature to the client as a Response.
 
 #### Register-clientId
 
-- This api takes a Data, clientId, clientSignature, serverSignature get from a formUrl params and send to server.
+- This api takes a Data, clientId, client-signature, server-signature get from a formUrl params and send to server.
 
 - Server verify this signature by calling verifySignature()
 
